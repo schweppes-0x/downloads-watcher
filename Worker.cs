@@ -1,151 +1,136 @@
-namespace downloads_watcher;
-
-public class Worker : BackgroundService
+namespace downloads_watcher
 {
-    private readonly ILogger<Worker> _logger;
+    public class Worker : BackgroundService
+    {
 
-    private ReaderWriterLockSlim rwlock;
-    private FileSystemWatcher watcher;
-    private Timer processTimer;
+        private ReaderWriterLockSlim rwlock;
+        private FileSystemWatcher watcher;
+        private FileSystemWatcher m4aWatcher;
     
-    private const string _basePath = "C:/Users/tony/Downloads/temp2";
-    private const string moveDir = "C:/Users/tony/Downloads/temp3";
-    private List<MyFile> paths = new List<MyFile>();
-    private bool moved = false;
-    public Worker(ILogger<Worker> logger)
-    {
-        _logger = logger;
-        Initialize();
-    }
+        private const string _basePath = "C:/Users/tony/Downloads";
+        private static readonly string moveDir = $"Z:/Music/{DateTime.Now.Year.ToString()}";
 
-    private void Initialize()
-    {
-        rwlock = new ReaderWriterLockSlim();
-
-        watcher = new FileSystemWatcher();
-        watcher.Path = _basePath;
-        watcher.Filter = "*.mp3";
-        watcher.IncludeSubdirectories = false;
-        watcher.EnableRaisingEvents = true;
-        watcher.Created += OnCreated;
-    }
-
-    private void OnCreated(object sender, FileSystemEventArgs e)
-    {
-        Console.WriteLine("[!] - Incoming file");
-        var myFile = new MyFile
-        {
-            Name = e.Name,
-            FullPath = e.FullPath
-        };
+        private Queue<MyFile> queue = new();
         
-        paths.Add(myFile);
-
-        while (IsFileLocked(new FileInfo(myFile.FullPath)))
+        private bool moved;
+        private bool isBusy = false;
+        public Worker(ILogger<Worker> logger)
         {
-            Console.WriteLine("[!] - Waiting for file to finish downloading");
-            Thread.Sleep(2500);
+            Initialize();
         }
-        
-        Console.WriteLine("[!] - Download finished. Start moving file");
-        moved = false;
-        processTimer = null;
-        try
+
+        private void Initialize()
         {
-            rwlock.EnterWriteLock();
-            while (!moved)
+            rwlock = new ReaderWriterLockSlim();
+            watcher = new FileSystemWatcher();
+            watcher.Path = _basePath;
+            watcher.Filter = "*.mp3";
+            watcher.IncludeSubdirectories = false;
+            watcher.EnableRaisingEvents = true;
+            watcher.Created += OnCreated;
+            
+            m4aWatcher = new FileSystemWatcher();
+            m4aWatcher.Path = _basePath;
+            m4aWatcher.Filter = "*.m4a";
+            m4aWatcher.IncludeSubdirectories = false;
+            m4aWatcher.EnableRaisingEvents = true;
+            m4aWatcher.Created += OnCreated;
+            
+        }
+
+        private void OnCreated(object sender, FileSystemEventArgs e)
+        {
+            Console.WriteLine("[!] - File incoming");
+            var myFile = new MyFile
             {
-                if (processTimer == null)
-                {
-                    Console.WriteLine("timer has been started");
-                    processTimer = new Timer(ProcessQueue, null, TimeSpan.Zero, TimeSpan.Zero);
-                }
-                else
-                {
-                    Console.WriteLine("Timer was not null");
-                    Thread.Sleep(2500);
-                    processTimer = null;
-                }
-                Thread.Sleep(1000);
+                Name = e.Name,
+                FullPath = e.FullPath
+            };
+            
+            queue.Enqueue(myFile); //add to queue
+            
+            if (!isBusy)
+                ProcessQueue(queue.Peek()); //if not busy, process file
+            
+            
+        }
+        private bool IsFileLocked(FileInfo file)
+        {
+            FileStream stream = null;
+
+            try
+            {
+                stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             }
-            
-
+            catch (IOException)
+            {
+                return true;
+            }
+            finally
+            {
+                if (stream != null)
+                    stream.Close();
+            }
+            //file is not locked
+            return false;
         }
-        catch (Exception ex)
-        {
-            // ignored
-        }
-        finally
-        {
-            if(rwlock.IsWriteLockHeld)
-                rwlock.ExitWriteLock();
-            
-            if(rwlock.IsReadLockHeld)
-                rwlock.ExitReadLock();
-        }
-    }
-    private bool IsFileLocked(FileInfo file)
-    {
-        FileStream stream = null;
-
-        try
-        {
-            stream = file.Open(FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        }
-        catch (IOException)
-        {
-            return true;
-        }
-        finally
-        {
-            if (stream != null)
-                stream.Close();
-        }
-        //file is not locked
-        return false;
-    }
     
-    private void ProcessQueue(object? sender)
-    {
-        try
+        private void ProcessQueue(MyFile item)
         {
-            Console.WriteLine("[!] - Moving incoming file..");
-            //rwlock.EnterReadLock();
+            isBusy = true;
+            while (IsFileLocked(new FileInfo(item.FullPath)))
+                Thread.Sleep(100);
+
+            moved = false;
             
-            var toMove = paths.First();
-            var moveToPath = Path.Combine(moveDir, toMove.Name);
+            try
+            {
+                rwlock.EnterWriteLock();
+                while (!moved)
+                {
+                    var moveToPath = Path.Combine(moveDir, item.Name);
+                    File.Move(item.FullPath, moveToPath);
             
-            File.Move(toMove.FullPath, moveToPath);
+                    moved = File.Exists(moveToPath);
+                    Console.WriteLine(moved ? "[!] - File successfully moved!" : "[x] - File has not been moved yet!");
+
+                    if (moved)
+                    {
+                        queue.Dequeue();
+                        isBusy = false;
+                    }
+                    Thread.Sleep(150);
+                }
+            }
+            catch (Exception ex)
+            {
+                isBusy = false;
+            }
+            finally
+            {
+                if(rwlock.IsWriteLockHeld)
+                    rwlock.ExitWriteLock();
             
-            moved = File.Exists(moveToPath);
-            Console.WriteLine(moved ? "[!] - File successfully moved!" : "[x] - File has not been moved yet!");
+                if(rwlock.IsReadLockHeld)
+                    rwlock.ExitReadLock();
+            }
         }
-        catch (Exception err)
+        protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            Console.WriteLine("[x] - Error occured while moving");
-            Console.WriteLine(err);
-        }
-        finally
-        {
-            if(rwlock.IsWriteLockHeld)
-                rwlock.ExitWriteLock();
-            
-            if (rwlock.IsReadLockHeld)
-                rwlock.ExitReadLock();
-            
-            paths.Clear();
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                if (queue.Any() && !isBusy)
+                {
+                    var item = queue.Peek();
+                    ProcessQueue(item);
+                }
+            }
         }
     }
 
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    internal class MyFile
     {
-        //ignored
+        public string Name { get; set; }
+        public string FullPath { get; set; }
     }
-}
-
-class MyFile
-{
-    public string Name { get; set; }
-    public string FullPath { get; set; }
 }
