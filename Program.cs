@@ -1,10 +1,14 @@
 using downloads_watcher;
 
 IHost host = Host.CreateDefaultBuilder(args)
-    .ConfigureServices(services =>
+    .UseWindowsService(options =>
     {
-        services.AddHostedService<Worker>();
+        options.ServiceName = "music-download-watcher";
+    }).ConfigureServices(services =>
+    {
+        services.AddHostedService<MusicWatcher>();
     })
     .Build();
+
 
 await host.RunAsync();

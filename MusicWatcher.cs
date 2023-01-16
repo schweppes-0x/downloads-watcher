@@ -1,9 +1,9 @@
 namespace downloads_watcher
 {
-    public class Worker : BackgroundService
+    public class MusicWatcher : BackgroundService
     {
-
         private ReaderWriterLockSlim rwlock;
+        
         private FileSystemWatcher watcher;
         private FileSystemWatcher m4aWatcher;
     
@@ -14,7 +14,7 @@ namespace downloads_watcher
         
         private bool moved;
         private bool isBusy = false;
-        public Worker(ILogger<Worker> logger)
+        public MusicWatcher(ILogger<MusicWatcher> logger)
         {
             Initialize();
         }
@@ -119,11 +119,16 @@ namespace downloads_watcher
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (queue.Any() && !isBusy)
+                while(queue.Any())
                 {
-                    var item = queue.Peek();
-                    ProcessQueue(item);
+                    if (!isBusy)
+                    {
+                        var item = queue.Peek();
+                        ProcessQueue(item);
+                    }
+                    Thread.Sleep(500);
                 }
+                Thread.Sleep(300000);
             }
         }
     }
