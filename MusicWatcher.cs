@@ -4,7 +4,7 @@ namespace downloads_watcher
     {
         private ReaderWriterLockSlim rwlock;
         
-        private FileSystemWatcher watcher;
+        private FileSystemWatcher mp3Watcher;
         private FileSystemWatcher m4aWatcher;
     
         private const string _basePath = "C:/Users/tony/Downloads";
@@ -14,7 +14,7 @@ namespace downloads_watcher
         
         private bool moved;
         private bool isBusy = false;
-        public MusicWatcher(ILogger<MusicWatcher> logger)
+        public MusicWatcher()
         {
             Initialize();
         }
@@ -22,12 +22,12 @@ namespace downloads_watcher
         private void Initialize()
         {
             rwlock = new ReaderWriterLockSlim();
-            watcher = new FileSystemWatcher();
-            watcher.Path = _basePath;
-            watcher.Filter = "*.mp3";
-            watcher.IncludeSubdirectories = false;
-            watcher.EnableRaisingEvents = true;
-            watcher.Created += OnCreated;
+            mp3Watcher = new FileSystemWatcher();
+            mp3Watcher.Path = _basePath;
+            mp3Watcher.Filter = "*.mp3";
+            mp3Watcher.IncludeSubdirectories = false;
+            mp3Watcher.EnableRaisingEvents = true;
+            mp3Watcher.Created += OnCreated;
             
             m4aWatcher = new FileSystemWatcher();
             m4aWatcher.Path = _basePath;
@@ -51,8 +51,6 @@ namespace downloads_watcher
             
             if (!isBusy)
                 ProcessQueue(queue.Peek()); //if not busy, process file
-            
-            
         }
         private bool IsFileLocked(FileInfo file)
         {
